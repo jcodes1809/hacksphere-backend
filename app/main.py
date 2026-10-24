@@ -10,9 +10,16 @@ from .battery import simulate
 from .cleaning import CleaningError, clean_dataframe, report_warnings
 from .config import BATTERY
 from .controller import decide
-from . import storage
+from . import quickml, storage
+import os
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="HackSphere Microgrid Backend")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_methods=["*"], allow_headers=["*"],
+)
 
 
 class Row(BaseModel):
@@ -27,14 +34,8 @@ class ForecastRequest(BaseModel):
     temp_offset: Optional[float] = 0.0
 
 
-def predict_demand(df: pd.DataFrame) -> list[float]:
-    """TEMPORARY mock. Step 6 replaces this with the QuickML call."""
-    out = []
-    for r in df.itertuples():
-        evening = 25 if 17 <= r.timestamp.hour <= 22 else 0
-        out.append(round(max(50.0, 60 + 4.5 * max(0, r.ambient_temp_c - 20) + evening
-                             - 0.02 * r.solar_irradiance_wm2), 2))
-    return out
+def predict_demand(df: pd.DataFrame):
+    return quickml.predict(df)
 
 
 def run_pipeline(df: pd.DataFrame, offset: float):
@@ -44,7 +45,9 @@ def run_pipeline(df: pd.DataFrame, offset: float):
         raise HTTPException(status_code=400, detail=str(e))
 
     df["ambient_temp_c"] = df["ambient_temp_c"] + (offset or 0.0)
-    demands = predict_demand(df)
+    demands, source = predict_demand(df)
+    extra = (["Using MOCK predictions (QuickML not connected)."]
+             if source == "mock" else [])
 
     hours = []
     for r, d in zip(df.itertuples(), demands):
@@ -68,7 +71,8 @@ def run_pipeline(df: pd.DataFrame, offset: float):
             "overload_count": sum(h["overload"] for h in hours),
             "co2_saved": round(sim["supplied_kwh"] * BATTERY.co2_kg_per_kwh, 2),
         },
-        "warnings": report_warnings(report) + sim["warnings"],
+        "warnings": extra + report_warnings(report) + sim["warnings"],
+        "model_source": source,
         "cleaning_report": report,
     }
 
