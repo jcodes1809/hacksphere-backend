@@ -10,6 +10,7 @@ from .battery import simulate
 from .cleaning import CleaningError, clean_dataframe, report_warnings
 from .config import BATTERY
 from .controller import decide
+from . import storage
 
 app = FastAPI(title="HackSphere Microgrid Backend")
 
@@ -82,7 +83,9 @@ def forecast(req: ForecastRequest):
     if not req.rows:
         raise HTTPException(status_code=400, detail="No rows provided.")
     df = pd.DataFrame([r.model_dump() for r in req.rows])
-    return run_pipeline(df, req.temp_offset)
+    result = run_pipeline(df, req.temp_offset)
+    storage.record_run(result, "forecast")
+    return result
 
 
 @app.post("/api/upload")
@@ -92,4 +95,16 @@ async def upload(file: UploadFile = File(...), temp_offset: float = Form(0.0)):
         df = pd.read_csv(io.BytesIO(raw))
     except Exception:
         raise HTTPException(status_code=400, detail="Could not read the file as CSV. Check the format.")
-    return run_pipeline(df, temp_offset)
+    result = run_pipeline(df, temp_offset)
+    storage.record_run(result, "upload")
+    return result
+
+
+@app.get("/api/logs")
+def logs():
+    return storage.get_logs()
+
+
+@app.get("/api/history")
+def history():
+    return storage.get_history()
