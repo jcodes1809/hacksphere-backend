@@ -46,7 +46,7 @@ def run_pipeline(df: pd.DataFrame, offset: float):
 
     df["ambient_temp_c"] = df["ambient_temp_c"] + (offset or 0.0)
     demands, source = predict_demand(df)
-    extra = (["Using MOCK predictions (QuickML not connected)."]
+    extra = (["Using DEMO predictions (live QuickML is off to protect the call quota)."]
              if source == "mock" else [])
 
     hours = []
@@ -112,3 +112,8 @@ def logs():
 @app.get("/api/history")
 def history():
     return storage.get_history()
+
+
+@app.get("/api/model")
+def model_status():
+    return quickml.status()

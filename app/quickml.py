@@ -1,44 +1,82 @@
-"""QuickML client. Falls back to a mock when no endpoint is set or the call fails.
-Env vars: QUICKML_ENDPOINT_URL, QUICKML_TOKEN (optional),
-QUICKML_AUTH_HEADER (optional, default 'Authorization: Zoho-oauthtoken {token}')."""
+"""QuickML client with QUOTA PROTECTION.
+The free QuickML quota is used up (1 call per forecast row). The real endpoint is called
+ONLY when BOTH are true: QUICKML_ENDPOINT_URL is set AND QUICKML_CALL_BUDGET > 0.
+Default budget is 0, so by default the real endpoint is NEVER called.
+Real results are cached, so the same input never costs calls twice."""
+import hashlib
 import os
+import threading
 
+import numpy as np
 import pandas as pd
-import requests
+from dotenv import load_dotenv
+
+load_dotenv()  # must run before ml_predict reads its env vars
+
+from .feature import build_features  # noqa: E402
+from .ml_predict import _backup_guess, call_quickml  # noqa: E402
+
+_lock = threading.Lock()
+_cache = {}
+_calls_used = 0
+COLS = ["timestamp", "ambient_temp_c", "humidity_pct", "solar_irradiance_wm2"]
 
 
-def mock_predict(df: pd.DataFrame) -> list[float]:
-    out = []
-    for r in df.itertuples():
-        evening = 25 if 17 <= r.timestamp.hour <= 22 else 0
-        out.append(round(max(50.0, 60 + 4.5 * max(0, r.ambient_temp_c - 20) + evening
-                             - 0.02 * r.solar_irradiance_wm2), 2))
-    return out
+def call_budget() -> int:
+    try:
+        return max(0, int(os.getenv("QUICKML_CALL_BUDGET", "0") or 0))
+    except ValueError:
+        return 0
 
 
-def predict(df: pd.DataFrame) -> tuple[list[float], str]:
-    """Returns (predictions, source) where source is 'quickml' or 'mock'."""
-    url = os.getenv("QUICKML_ENDPOINT_URL", "").strip()
-    if not url:
+def status() -> dict:
+    with _lock:
+        return {"live_enabled": call_budget() > 0 and os.getenv("QUICKML_ENDPOINT_URL", "").startswith("http"),
+                "call_budget": call_budget(), "calls_used": _calls_used,
+                "cached_forecasts": len(_cache)}
+
+
+def reset() -> None:
+    global _calls_used
+    with _lock:
+        _cache.clear()
+        _calls_used = 0
+
+
+def _key(df: pd.DataFrame) -> str:
+    d = df[COLS].copy()
+    d[COLS[1:]] = d[COLS[1:]].round(3)
+    return hashlib.sha256(d.to_csv(index=False).encode()).hexdigest()
+
+
+def mock_predict(df: pd.DataFrame) -> list:
+    return [round(float(x), 2) for x in _backup_guess(df)]
+
+
+def predict(df: pd.DataFrame):
+    """Returns (predictions, source): 'quickml', 'quickml-cached' or 'mock'."""
+    global _calls_used
+    key, n = _key(df), len(df)
+    with _lock:
+        if key in _cache:
+            return list(_cache[key]), "quickml-cached"
+        url = os.getenv("QUICKML_ENDPOINT_URL", "").strip()
+        allowed = url.startswith("http") and _calls_used + n <= call_budget()
+        if allowed:
+            _calls_used += n          # reserve BEFORE calling, so failures still count
+    if not allowed:
         return mock_predict(df), "mock"
     try:
-        # TODO (when P1 delivers feature.py): add the same features here
-        # before sending, e.g. feats = feature.make_features(df)
-        feats = df.copy()
-        feats["timestamp"] = feats["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
-        headers = {}
-        token = os.getenv("QUICKML_TOKEN", "").strip()
-        if token:
-            tpl = os.getenv("QUICKML_AUTH_HEADER", "Authorization: Zoho-oauthtoken {token}")
-            name, _, value = tpl.partition(":")
-            headers[name.strip()] = value.strip().format(token=token)
-        resp = requests.post(url, json={"data": feats.to_dict(orient="records")},
-                             headers=headers, timeout=10)
-        resp.raise_for_status()
-        preds = [float(x) for x in resp.json()["predictions"]]
-        if len(preds) != len(df):
-            raise ValueError(f"expected {len(df)} predictions, got {len(preds)}")
-        return preds, "quickml"
+        feats = build_features(df)
+        sorted_preds = np.asarray(call_quickml(feats), dtype=float)
+        if len(sorted_preds) != n:
+            raise ValueError(f"expected {n} predictions, got {len(sorted_preds)}")
+        out = np.empty(n)
+        out[feats["orig_pos"].values] = sorted_preds
+        preds = [round(float(x), 2) for x in out]
+        with _lock:
+            _cache[key] = preds
+        return list(preds), "quickml"
     except Exception as e:
-        print(f"Warning: QuickML call failed ({e}). Using mock fallback.")
+        print(f"Warning: QuickML call failed ({e}). Using demo fallback.")
         return mock_predict(df), "mock"
