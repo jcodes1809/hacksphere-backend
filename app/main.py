@@ -95,6 +95,7 @@ def forecast(req: ForecastRequest):
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...), temp_offset: float = Form(0.0)):
     raw = await file.read()
+    catalyst_store.save_upload(file.filename, raw)
     try:
         df = pd.read_csv(io.BytesIO(raw))
     except Exception:
