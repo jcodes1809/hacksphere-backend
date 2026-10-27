@@ -26,6 +26,10 @@ cmd = [sys.executable, "-m", "pip", "install", "--only-binary=:all:", *platforms
        "-r", "requirements-deploy.txt"]
 print("Installing Linux packages (this takes a minute)...")
 subprocess.check_call(cmd)
+# zcatalyst-sdk pins typing-extensions~=4.12, which clashes with pydantic; it is pure Python
+# and its only other dependency (requests) is already installed, so add it without deps.
+subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--no-deps', '--only-binary=:all:',
+                       '--target', str(BUILD), 'zcatalyst-sdk==1.4.0'])
 
 shutil.copytree("app", BUILD / "app", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 shutil.copy("requirements-deploy.txt", BUILD / "requirements.txt")
@@ -35,7 +39,7 @@ for d in list(BUILD.rglob("tests")) + list(BUILD.rglob("__pycache__")):
     if d.is_dir():
         shutil.rmtree(d, ignore_errors=True)
 
-for must in ("uvicorn", "fastapi", "pandas", "numpy", "app"):
+for must in ("uvicorn", "fastapi", "pandas", "numpy", "zcatalyst_sdk", "app"):
     assert (BUILD / must).exists(), f"missing in build: {must}"
 
 with zipfile.ZipFile("backend.zip", "w", zipfile.ZIP_DEFLATED) as z:
