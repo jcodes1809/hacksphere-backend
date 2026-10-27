@@ -4,6 +4,8 @@ import threading
 from datetime import datetime
 from itertools import count
 
+from . import catalyst_store
+
 _lock = threading.Lock()
 _ids = count(1)
 _runs: list[dict] = []
@@ -23,8 +25,11 @@ def record_run(result: dict, source: str) -> int:
     s = result["summary"]
     with _lock:
         run_id = next(_ids)
-        _runs.append({"id": run_id, "time": _now(), "source": source,
-                      "peak_kw": s["peak_kw"], "overload_count": s["overload_count"]})
+        run = {"id": run_id, "time": _now(), "source": source,
+               "peak_kw": s["peak_kw"], "overload_count": s["overload_count"],
+               "model_source": result.get("model_source", "")}
+        _runs.append(run)
+        start = len(_logs)
         prev_mode = None
         for h in result["hours"]:
             t = h["timestamp"].isoformat()
@@ -38,8 +43,10 @@ def record_run(result: dict, source: str) -> int:
             _log(run_id, _now(), "warning", w)
         _log(run_id, _now(), "run", f"{source} run #{run_id}: peak {s['peak_kw']} kW, "
                                      f"{s['overload_count']} overload hour(s)")
+        new_logs = list(_logs[start:])
         del _runs[:-MAX_ITEMS]
         del _logs[:-MAX_ITEMS]
+    catalyst_store.mirror_run(run, new_logs)
     return run_id
 
 

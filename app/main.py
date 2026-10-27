@@ -117,3 +117,18 @@ def history():
 @app.get("/api/model")
 def model_status():
     return quickml.status()
+
+
+# --- Catalyst Data Store / Stratus mirror (best-effort) ---
+from . import catalyst_store  # noqa: E402
+
+
+@app.middleware("http")
+async def _catalyst_ctx(request, call_next):
+    catalyst_store.set_request(request)
+    return await call_next(request)
+
+
+@app.get("/api/storage")
+def storage_status():
+    return catalyst_store.status()

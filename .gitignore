@@ -5,3 +5,4 @@ __pycache__/
 backend.zip
 kit/
 .zoho_token_cache.json
+build_appsail/
