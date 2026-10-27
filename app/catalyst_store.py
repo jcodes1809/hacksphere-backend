@@ -1,5 +1,5 @@
 """Best-effort mirror of runs/logs to Catalyst Data Store and uploads to Stratus.
-Off unless CATALYST_STORE=1. Never raises: failures are recorded in status()."""
+Off unless ENABLE_CLOUD_STORAGE=1. Never raises: failures are recorded in status()."""
 import contextvars
 import io
 import logging
@@ -12,7 +12,7 @@ _state = {"last_error": None, "runs_saved": 0, "logs_saved": 0, "uploads_saved":
 
 
 def enabled() -> bool:
-    return os.getenv("CATALYST_STORE", "0") == "1"
+    return os.getenv("ENABLE_CLOUD_STORAGE", "0") == "1"
 
 
 def set_request(request) -> None:

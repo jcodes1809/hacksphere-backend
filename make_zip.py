@@ -31,6 +31,12 @@ subprocess.check_call(cmd)
 subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--no-deps', '--only-binary=:all:',
                        '--target', str(BUILD), 'zcatalyst-sdk==1.4.0'])
 
+sdk = [sys.executable, "-m", "pip", "install", "--only-binary=:all:", *platforms,
+       "--python-version", PYVER, "--implementation", "cp", "--target", str(BUILD), "zcatalyst-sdk"]
+if subprocess.call(sdk) != 0:
+    print("Retrying SDK with --pre ...")
+    subprocess.check_call(sdk + ["--pre"])
+
 shutil.copytree("app", BUILD / "app", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 shutil.copy("requirements-deploy.txt", BUILD / "requirements.txt")
 
