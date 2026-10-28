@@ -54,9 +54,10 @@ def mirror_run(run: dict, logs: list[dict]) -> None:
 
 
 def _to_body(content):
-    """Stratus accepts a string or BufferReader (not BytesIO) and rejects empty bodies."""
-    if isinstance(content, (bytes, bytearray)):
-        content = bytes(content).decode("utf-8", errors="replace")
+    """Stratus validator accepts bytes/BufferedReader; a str fails its check. Reject empty bodies."""
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    content = bytes(content)
     if not content:
         raise ValueError("empty upload body")
     return content
