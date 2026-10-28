@@ -53,6 +53,15 @@ def mirror_run(run: dict, logs: list[dict]) -> None:
         _fail("data_store", e)
 
 
+def _to_body(content):
+    """Stratus accepts a string or BufferReader (not BytesIO) and rejects empty bodies."""
+    if isinstance(content, (bytes, bytearray)):
+        content = bytes(content).decode("utf-8", errors="replace")
+    if not content:
+        raise ValueError("empty upload body")
+    return content
+
+
 def save_upload(filename: str, content: bytes) -> None:
     bucket_name = os.getenv("STRATUS_BUCKET")
     if not enabled() or not bucket_name:
@@ -61,7 +70,7 @@ def save_upload(filename: str, content: bytes) -> None:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         safe = "".join(c for c in (filename or "upload.csv") if c.isalnum() or c in "._-")
         bucket = _app().stratus().bucket(bucket_name)
-        bucket.put_object(f"uploads/{stamp}_{safe}", io.BytesIO(content))
+        bucket.put_object(f"uploads/{stamp}_{safe}", _to_body(content))
         _state["uploads_saved"] += 1
     except Exception as e:  # noqa: BLE001
         _fail("stratus", e)
